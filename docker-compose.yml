@@ -13,11 +13,14 @@ services:
     environment:
       - WHISPER_MODE=api
       - WHISPER_API_URL=http://whisper:9000
+    ports:
+      - "3000:3000"  # Web API for extension
     volumes:
       - ./data:/app/data
+    networks:
+      - anytype-net
 
   # Self-hosted Whisper ASR service
-  # Uses openai-whisper-asr-webservice - a popular self-hosted Whisper API
   whisper:
     image: onerahmet/openai-whisper-asr-webservice:latest
     container_name: anytype-whisper
@@ -25,27 +28,17 @@ services:
     ports:
       - "9000:9000"
     environment:
-      # Model options: tiny, base, small, medium, large-v3
-      # Smaller = faster but less accurate
-      # larger = slower but more accurate
       - ASR_MODEL=base
       - ASR_ENGINE=faster_whisper
     volumes:
       - whisper-models:/root/.cache/huggingface
-    # Uncomment for GPU support (requires nvidia-docker)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    networks:
+      - anytype-net
+
+networks:
+  anytype-net:
+    driver: bridge
 
 volumes:
   whisper-models:
     name: anytype-whisper-models
-
-
-
-
-

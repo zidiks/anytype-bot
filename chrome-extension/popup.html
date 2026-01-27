@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      width: 380px;
+      font-family: 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      padding: 20px;
+    }
+    
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    .header span {
+      font-size: 12px;
+      color: #888;
+    }
+    
+    .section {
+      margin-bottom: 20px;
+    }
+    
+    .section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .input-group {
+      margin-bottom: 12px;
+    }
+    
+    .input-group label {
+      display: block;
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 5px;
+    }
+    
+    .input-group input {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    
+    .input-group input:focus {
+      outline: none;
+      border-color: #667eea;
+      background: rgba(255,255,255,0.08);
+    }
+    
+    .input-group input::placeholder {
+      color: #555;
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 10px;
+    }
+    
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn:active {
+      transform: translateY(0);
+    }
+    
+    .btn.secondary {
+      background: rgba(255,255,255,0.1);
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      text-align: center;
+      display: none;
+    }
+    
+    .status.success {
+      display: block;
+      background: rgba(46, 213, 115, 0.2);
+      color: #2ed573;
+    }
+    
+    .status.error {
+      display: block;
+      background: rgba(255, 71, 87, 0.2);
+      color: #ff4757;
+    }
+    
+    .status.info {
+      display: block;
+      background: rgba(102, 126, 234, 0.2);
+      color: #667eea;
+    }
+    
+    .connected {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(46, 213, 115, 0.1);
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    
+    .connected .dot {
+      width: 10px;
+      height: 10px;
+      background: #2ed573;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .help {
+      margin-top: 15px;
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+    
+    .help a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    
+    #setup-section, #connected-section {
+      display: none;
+    }
+    
+    #setup-section.active, #connected-section.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>🎥 Anytype Meet Recorder</h1>
+      <span>Record & summarize Google Meet</span>
+    </div>
+  </div>
+
+  <!-- Setup Section -->
+  <div id="setup-section" class="active">
+    <div class="section">
+      <div class="section-title">Connect to Telegram Bot</div>
+      <p style="font-size: 13px; color: #888; margin-bottom: 15px;">
+        1. Открой Telegram бота<br>
+        2. Нажми «🔌 Подключить расширение»<br>
+        3. Нажми кнопку — подключится автоматически!
+      </p>
+      
+      <div style="padding: 12px; background: rgba(102,126,234,0.1); border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #667eea;">
+        💡 Или вставь URL вручную:
+      </div>
+      
+      <div class="input-group">
+        <label>Config URL (ручной ввод)</label>
+        <input type="text" id="configUrl" placeholder="http://your-server:3000/api/extension/config/...">
+      </div>
+    </div>
+
+    <button class="btn" id="loadConfigBtn">🔗 Подключить вручную</button>
+    
+    <div class="status" id="setup-status"></div>
+  </div>
+
+  <!-- Connected Section -->
+  <div id="connected-section">
+    <div class="connected">
+      <div class="dot"></div>
+      <span>Подключено к боту</span>
+    </div>
+    
+    <div class="section">
+      <div class="section-title">Статус</div>
+      <p style="font-size: 13px; color: #ccc;" id="config-info">
+        Загрузка...
+      </p>
+    </div>
+
+    <button class="btn secondary" id="disconnectBtn">🔌 Отключиться</button>
+    
+    <div class="status" id="connected-status"></div>
+  </div>
+
+  <div class="help">
+    Открой <a href="https://meet.google.com" target="_blank">Google Meet</a> и нажми кнопку Record! 🎥
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

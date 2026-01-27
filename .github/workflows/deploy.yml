@@ -26,8 +26,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
+      # Build main bot
+      - name: Extract metadata for main bot
+        id: meta-bot
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -35,14 +36,33 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
-      - name: Build and push Docker image
+      - name: Build and push main bot
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-bot.outputs.tags }}
+          labels: ${{ steps.meta-bot.outputs.labels }}
+
+      # Build meet bot
+      - name: Extract metadata for meet bot
+        id: meta-meet
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/meet-bot
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      - name: Build and push meet bot
+        uses: docker/build-push-action@v5
+        with:
+          context: ./meet-bot
+          file: ./meet-bot/Dockerfile
+          push: true
+          tags: ${{ steps.meta-meet.outputs.tags }}
+          labels: ${{ steps.meta-meet.outputs.labels }}
 
   deploy:
     needs: build-and-push
@@ -62,4 +82,3 @@ jobs:
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -af
-

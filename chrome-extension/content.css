@@ -1,0 +1,107 @@
+/* Anytype Meet Recorder Styles */
+
+#anytype-recorder-btn {
+  position: fixed;
+  bottom: 100px;
+  right: 20px;
+  z-index: 999999;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#anytype-recorder-btn .anytype-btn-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 50px;
+  font-family: 'Google Sans', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  transition: all 0.3s ease;
+}
+
+#anytype-recorder-btn .anytype-btn-inner.anytype-disconnected {
+  background: linear-gradient(135deg, #636e72 0%, #2d3436 100%);
+  box-shadow: 0 4px 15px rgba(99, 110, 114, 0.4);
+}
+
+#anytype-recorder-btn:hover .anytype-btn-inner {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+#anytype-recorder-btn.recording .anytype-btn-inner {
+  background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+  animation: pulse 2s infinite;
+}
+
+#anytype-recorder-btn .anytype-icon {
+  font-size: 18px;
+}
+
+#anytype-recorder-btn .anytype-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #ff4757;
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+  }
+  50% {
+    box-shadow: 0 4px 25px rgba(245, 87, 108, 0.6);
+  }
+  100% {
+    box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+  }
+}
+
+/* Notifications */
+.anytype-notification {
+  position: fixed;
+  bottom: 170px;
+  right: 20px;
+  padding: 12px 20px;
+  background: #323232;
+  color: white;
+  border-radius: 8px;
+  font-family: 'Google Sans', Roboto, sans-serif;
+  font-size: 14px;
+  z-index: 999999;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: all 0.3s ease;
+  max-width: 300px;
+}
+
+.anytype-notification.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.anytype-notification.success {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.anytype-notification.error {
+  background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+}
+
+.anytype-notification.warning {
+  background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
+  color: #333;
+}
+

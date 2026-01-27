@@ -28,14 +28,21 @@ services:
       - whisper-models:/root/.cache/huggingface
     networks:
       - anytype-net
-    # Uncomment for GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+
+  # Google Meet recording bot - pulls from GHCR
+  meet-bot:
+    image: ghcr.io/${GITHUB_REPOSITORY:-zidiks/anytype-bot}/meet-bot:latest
+    container_name: anytype-meet-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - WHISPER_API_URL=http://whisper:9000
+    depends_on:
+      - whisper
+    networks:
+      - anytype-net
+    shm_size: '2gb'
 
 networks:
   anytype-net:
@@ -44,4 +51,3 @@ networks:
 volumes:
   whisper-models:
     name: anytype-whisper-models
-
