@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # Main Telegram bot
+  voice-notes-bot:
+    build: .
+    container_name: anytype-voice-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - whisper
+    environment:
+      - WHISPER_MODE=api
+      - WHISPER_API_URL=http://whisper:9000
+    volumes:
+      - ./data:/app/data
+
+  # Self-hosted Whisper ASR service
+  # Uses openai-whisper-asr-webservice - a popular self-hosted Whisper API
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: anytype-whisper
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      # Model options: tiny, base, small, medium, large-v3
+      # Smaller = faster but less accurate
+      # larger = slower but more accurate
+      - ASR_MODEL=base
+      - ASR_ENGINE=faster_whisper
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    # Uncomment for GPU support (requires nvidia-docker)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  whisper-models:
+    name: anytype-whisper-models
+
+
+
+
+

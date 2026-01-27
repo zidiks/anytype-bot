@@ -1,0 +1,29 @@
+# Docker Compose for running bot with LOCAL whisper (no separate whisper container)
+# Use this if you want faster-whisper to run inside the bot container
+
+version: '3.8'
+
+services:
+  voice-notes-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: anytype-voice-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - WHISPER_MODE=local
+      - WHISPER_MODEL=base
+    volumes:
+      - ./data:/app/data
+      - whisper-cache:/root/.cache/huggingface
+
+volumes:
+  whisper-cache:
+    name: anytype-whisper-cache
+
+
+
+
+

@@ -1,0 +1,46 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data
+data/
+*.ogg
+*.wav
+*.mp3
+
+# Models cache
+.cache/
+huggingface/
+
+# Logs
+*.log
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.idea
+
+
+
+
+
