@@ -4,10 +4,11 @@ Telegram bot that transcribes voice messages, generates AI summaries, and saves 
 
 ## Features
 
-- 🎤 **Voice Transcription** — Self-hosted speech-to-text using faster-whisper
+- 🎤 **Voice Transcription** — Self-hosted speech-to-text using Whisper
 - 🤖 **AI Summarization** — Generates concise summaries via DeepSeek API
 - 💾 **Anytype Integration** — Saves notes with summary + full transcription
-- 🔗 **Auto-linking** — Automatically adds references to your notes collection
+- 👤 **Multi-user** — Shows Telegram username in note titles
+- 🚀 **CI/CD** — Automatic deployment via GitHub Actions
 
 ## Architecture
 
@@ -168,9 +169,66 @@ anytype-bot/
 ├── requirements.txt
 ├── Dockerfile
 ├── Dockerfile.local
-├── docker-compose.yml
+├── docker-compose.yml          # Local development
+├── docker-compose.prod.yml     # Production (pulls from GHCR)
 ├── docker-compose.local.yml
 └── env.example
+```
+
+## CI/CD & Production Deployment
+
+### GitHub Actions
+
+The project includes automatic CI/CD via GitHub Actions (`.github/workflows/deploy.yml`):
+
+1. **Build** — Builds Docker image on push to `main`
+2. **Push** — Pushes to GitHub Container Registry (ghcr.io)
+3. **Deploy** — SSHs to server and deploys with docker-compose
+
+### Required GitHub Secrets
+
+Configure these in your repository Settings → Secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `SERVER_HOST` | Server IP address |
+| `SERVER_PORT` | SSH port (usually 22) |
+| `SERVER_USERNAME` | SSH username |
+| `SERVER_PASSWORD` | SSH password |
+| `DEPLOY_PATH` | Path to project on server (e.g., `/root/anytype-bot`) |
+
+> Note: `GITHUB_TOKEN` is provided automatically by GitHub Actions.
+
+### Server Setup
+
+1. **Clone repository on server:**
+```bash
+cd /root
+git clone https://github.com/YOUR_USERNAME/anytype-bot.git
+cd anytype-bot
+```
+
+2. **Create `.env` file:**
+```bash
+cp env.example .env
+nano .env  # Edit with your credentials
+```
+
+3. **First deploy (manual):**
+```bash
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+4. **Subsequent deploys** happen automatically when you push to `main`.
+
+### Production Docker Compose
+
+Use `docker-compose.prod.yml` for production — it pulls pre-built images from GitHub Container Registry:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## API Reference

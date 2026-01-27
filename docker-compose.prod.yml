@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Main Telegram bot - pulls from GitHub Container Registry
+  voice-notes-bot:
+    image: ghcr.io/${GITHUB_REPOSITORY:-zidiks/anytype-bot}:latest
+    container_name: anytype-voice-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - whisper
+    environment:
+      - WHISPER_MODE=api
+      - WHISPER_API_URL=http://whisper:9000
+    networks:
+      - anytype-net
+
+  # Self-hosted Whisper ASR service
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: anytype-whisper
+    restart: unless-stopped
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=faster_whisper
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    networks:
+      - anytype-net
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+networks:
+  anytype-net:
+    driver: bridge
+
+volumes:
+  whisper-models:
+    name: anytype-whisper-models
+
