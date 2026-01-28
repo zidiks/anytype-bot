@@ -26,9 +26,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build main bot
-      - name: Extract metadata for main bot
-        id: meta-bot
+      - name: Extract metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -36,39 +35,33 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
-      - name: Build and push main bot
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta-bot.outputs.tags }}
-          labels: ${{ steps.meta-bot.outputs.labels }}
-
-      # Build meet bot
-      - name: Extract metadata for meet bot
-        id: meta-meet
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/meet-bot
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=
-
-      - name: Build and push meet bot
-        uses: docker/build-push-action@v5
-        with:
-          context: ./meet-bot
-          file: ./meet-bot/Dockerfile
-          push: true
-          tags: ${{ steps.meta-meet.outputs.tags }}
-          labels: ${{ steps.meta-meet.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout for compose file
+        uses: actions/checkout@v4
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.DEPLOY_PATH }}
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:

@@ -1,53 +1,17 @@
 version: '3.8'
 
 services:
-  # Main Telegram bot - pulls from GitHub Container Registry
   voice-notes-bot:
-    image: ghcr.io/${GITHUB_REPOSITORY:-zidiks/anytype-bot}:latest
-    container_name: anytype-voice-bot
+    image: ghcr.io/zidiks/anytype-bot:latest
     restart: unless-stopped
-    env_file:
-      - .env
-    depends_on:
-      - whisper
-    environment:
-      - WHISPER_MODE=api
-      - WHISPER_API_URL=http://whisper:9000
-    networks:
-      - anytype-net
+    env_file: .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
 
-  # Self-hosted Whisper ASR service
   whisper:
     image: onerahmet/openai-whisper-asr-webservice:latest
-    container_name: anytype-whisper
     restart: unless-stopped
     environment:
       - ASR_MODEL=base
-      - ASR_ENGINE=faster_whisper
-    volumes:
-      - whisper-models:/root/.cache/huggingface
-    networks:
-      - anytype-net
-
-  # Google Meet recording bot - pulls from GHCR
-  meet-bot:
-    image: ghcr.io/${GITHUB_REPOSITORY:-zidiks/anytype-bot}/meet-bot:latest
-    container_name: anytype-meet-bot
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - WHISPER_API_URL=http://whisper:9000
-    depends_on:
-      - whisper
-    networks:
-      - anytype-net
-    shm_size: '2gb'
-
-networks:
-  anytype-net:
-    driver: bridge
-
-volumes:
-  whisper-models:
-    name: anytype-whisper-models
