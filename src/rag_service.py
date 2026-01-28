@@ -275,58 +275,46 @@ class SyncService:
             objects = response.get("data", [])
             logger.info(f"Found {len(objects)} notes in Anytype")
             
+            # Debug: log first object structure
+            if objects:
+                sample = objects[0]
+                logger.info(f"Sample object keys: {list(sample.keys())}")
+                logger.info(f"Sample - name: '{sample.get('name', '')[:50]}', snippet: '{sample.get('snippet', '')[:100]}'")
+            
             for obj in objects:
                 try:
                     obj_id = obj.get("id")
-                    name = obj.get("name", "")
+                    name = obj.get("name", "") or ""
+                    snippet = obj.get("snippet", "") or ""
                     
-                    # Get full object with body
-                    full_obj = await self.anytype.get_object(obj_id)
-                    
-                    # Debug: log first object structure
-                    if stats['synced'] == 0 and stats['skipped'] == 0:
-                        logger.info(f"Sample object structure: {list(full_obj.keys())}")
-                        if 'body' in full_obj:
-                            body_sample = str(full_obj.get('body', ''))[:200]
-                            logger.info(f"Body sample: {body_sample}")
-                        if 'blocks' in full_obj:
-                            logger.info(f"Has blocks: {len(full_obj.get('blocks', []))} blocks")
-                    
-                    # Extract body - could be string or need to extract from blocks
-                    body = ""
-                    if isinstance(full_obj.get("body"), str):
-                        body = full_obj.get("body", "")
-                    elif "blocks" in full_obj:
-                        # Extract text from blocks
-                        blocks = full_obj.get("blocks", [])
-                        body_parts = []
-                        for block in blocks:
-                            if isinstance(block, dict):
-                                # Try different block formats
-                                text = block.get("text", "")
-                                if isinstance(text, dict):
-                                    text = text.get("text", "") or text.get("content", "")
-                                if text:
-                                    body_parts.append(str(text))
-                        body = "\n".join(body_parts)
-                    
-                    # Combine name and body for indexing
-                    full_text = f"{name}\n\n{body}" if body else name
-                    
-                    if len(full_text) < 20:
-                        logger.debug(f"Skipping short note: {name[:50]} ({len(full_text)} chars)")
+                    # Skip archived objects
+                    if obj.get("archived", False):
                         stats['skipped'] += 1
                         continue
+                    
+                    # Use snippet as main content (it's the note body preview)
+                    # For notes, snippet is more important than name
+                    if snippet:
+                        full_text = f"{name}\n\n{snippet}" if name else snippet
+                    else:
+                        full_text = name
+                    
+                    if len(full_text.strip()) < 10:
+                        logger.debug(f"Skipping empty note: id={obj_id}")
+                        stats['skipped'] += 1
+                        continue
+                    
+                    # Use name or first part of snippet as title
+                    title = name if name else (snippet[:50] + "..." if len(snippet) > 50 else snippet)
                     
                     # Index the note
                     success = await self.rag.add_note(
                         note_id=obj_id,
                         text=full_text,
                         metadata={
-                            'title': name,
+                            'title': title,
                             'source': 'anytype',
                             'anytype_id': obj_id,
-                            'created': obj.get('created_date', ''),
                         }
                     )
                     
