@@ -10,6 +10,7 @@ class MeetRecorder {
     this.lastCaptionText = ''; // Track last caption to detect updates vs new
     this.lastCaptionTime = 0;  // When last caption was captured
     this.pendingCaption = '';  // Caption being built up
+    this.pendingSpeaker = '';  // Current speaker name
     this.meetingTitle = '';
     this.startTime = null;
     this.captionObserver = null;
@@ -30,6 +31,10 @@ class MeetRecorder {
     this.visibilityHandler = null;
     this.webLockAbort = null;
     this.webLockRelease = null;
+    
+    // Caption status monitoring
+    this.captionsEnabled = false;
+    this.captionStatusInterval = null;
     
     // Patterns to filter out (UI elements, not real captions)
     this.filterPatterns = [
@@ -90,6 +95,90 @@ class MeetRecorder {
     
     this.createFloatingButton();
     this.detectMeeting();
+    this.startCaptionStatusMonitor();
+  }
+  
+  /**
+   * Check if captions are currently visible/enabled
+   */
+  checkCaptionsEnabled() {
+    // Look for caption container
+    const captionContainer = document.querySelector(
+      '[aria-label="Субтитры"], [aria-label="Captions"], [aria-label*="caption" i], [aria-label*="subtitle" i]'
+    );
+    
+    // Also check for the captions button state
+    const captionButton = document.querySelector(
+      '[aria-label*="субтитр" i], [aria-label*="caption" i], [data-tooltip*="субтитр" i], [data-tooltip*="caption" i]'
+    );
+    
+    // Captions are enabled if container exists and has content
+    const hasContainer = !!captionContainer;
+    const hasContent = captionContainer?.textContent?.trim().length > 5;
+    
+    // Or if the button indicates captions are on
+    const buttonPressed = captionButton?.getAttribute('aria-pressed') === 'true';
+    
+    return hasContainer && hasContent;
+  }
+  
+  /**
+   * Start monitoring caption status
+   */
+  startCaptionStatusMonitor() {
+    // Initial check
+    this.updateCaptionStatus();
+    
+    // Check every 2 seconds
+    this.captionStatusInterval = setInterval(() => {
+      this.updateCaptionStatus();
+    }, 2000);
+  }
+  
+  /**
+   * Update caption status indicator
+   */
+  updateCaptionStatus() {
+    const wasEnabled = this.captionsEnabled;
+    this.captionsEnabled = this.checkCaptionsEnabled();
+    
+    // Update button indicator
+    this.updateCaptionIndicator();
+    
+    // Log status change
+    if (wasEnabled !== this.captionsEnabled) {
+      console.log(`📺 Captions ${this.captionsEnabled ? 'ENABLED' : 'DISABLED'}`);
+      
+      // Warn if recording without captions
+      if (this.isRecording && !this.captionsEnabled) {
+        this.showNotification('⚠️ Captions turned OFF! Press C to enable.', 'warning');
+      }
+    }
+  }
+  
+  /**
+   * Update caption indicator on button
+   */
+  updateCaptionIndicator() {
+    if (!this.floatingButton || !this.isConnected) return;
+    
+    let indicator = this.floatingButton.querySelector('.anytype-caption-status');
+    
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.className = 'anytype-caption-status';
+      this.floatingButton.appendChild(indicator);
+    }
+    
+    if (this.captionsEnabled) {
+      indicator.className = 'anytype-caption-status caption-on';
+      indicator.innerHTML = '🔤 CC';
+      indicator.title = 'Субтитры включены';
+    } else {
+      indicator.className = 'anytype-caption-status caption-off';
+      indicator.innerHTML = '🔇 CC';
+      indicator.title = 'Субтитры выключены! Нажмите C';
+    }
   }
 
   /**
@@ -154,9 +243,11 @@ class MeetRecorder {
     const inner = this.floatingButton.querySelector('.anytype-btn-inner');
     if (this.isRecording) {
       this.floatingButton.classList.add('recording');
+      // Show warning if captions are off during recording
+      const captionWarning = !this.captionsEnabled ? ' ⚠️' : '';
       inner.innerHTML = `
         <span class="anytype-icon">⏹️</span>
-        <span class="anytype-text">Stop & Save</span>
+        <span class="anytype-text">Stop & Save${captionWarning}</span>
       `;
     } else {
       this.floatingButton.classList.remove('recording');
@@ -165,6 +256,9 @@ class MeetRecorder {
         <span class="anytype-text">Record</span>
       `;
     }
+    
+    // Also update caption indicator
+    this.updateCaptionIndicator();
   }
 
   /**
@@ -316,13 +410,21 @@ class MeetRecorder {
     this.startTime = new Date();
     this.transcript = [];
     this.pendingCaption = '';
+    this.pendingSpeaker = '';
+    this.pendingCaptions = new Map(); // Track each speaker separately
     this.lastCaptionTime = 0;
     this.lastCaptionText = '';
     this.intermediateSummaries = [];
     this.lastSummaryIndex = 0;
     
     this.updateButton();
-    this.showNotification('Recording started! Make sure captions are ON (press C).');
+    
+    // Check caption status and show appropriate message
+    if (this.captionsEnabled) {
+      this.showNotification('✅ Recording started! Captions detected.', 'success');
+    } else {
+      this.showNotification('⚠️ Recording started but CAPTIONS ARE OFF!\nPress C to enable captions.', 'warning');
+    }
     
     // Start keep-alive to prevent tab throttling
     this.startKeepAlive();
@@ -442,6 +544,51 @@ class MeetRecorder {
   }
 
   /**
+   * Extract caption text from a caption block
+   * Structure: main div > [speaker div with img] + [caption text div]
+   */
+  extractCaptionFromBlock(block) {
+    // Find the div that contains the actual caption text
+    // It's the sibling of the div containing the speaker avatar (img)
+    const children = Array.from(block.children);
+    
+    let speakerName = '';
+    let captionTexts = [];
+    
+    for (const child of children) {
+      // Speaker block has an img (avatar)
+      if (child.querySelector('img')) {
+        // Extract speaker name from span inside
+        const nameSpan = child.querySelector('span');
+        if (nameSpan) {
+          speakerName = nameSpan.textContent?.trim() || '';
+        }
+        continue;
+      }
+      
+      // Skip buttons
+      if (child.closest('button') || child.querySelector('button') ||
+          child.getAttribute('role') === 'button') {
+        continue;
+      }
+      
+      // Skip elements with icons
+      if (child.querySelector('i, svg, [class*="icon"]')) continue;
+      
+      // This should be the caption text div - get ALL its text content
+      const text = child.textContent?.trim();
+      if (text && text.length > 3) {
+        captionTexts.push(text);
+      }
+    }
+    
+    // Combine all caption texts from this block
+    const captionText = captionTexts.join(' ').replace(/\s+/g, ' ').trim();
+    
+    return { speakerName, captionText };
+  }
+
+  /**
    * Observe captions in the DOM
    */
   observeCaptions() {
@@ -464,88 +611,271 @@ class MeetRecorder {
         return;
       }
       
-      // Get all text divs inside caption container, excluding buttons
-      const textElements = captionContainer.querySelectorAll('div');
-      let currentCaptionText = '';
+      // Collect ALL caption blocks with speaker attribution
+      // Google Meet shows multiple speakers' captions simultaneously
+      let captionEntries = []; // Array of {speaker, text}
       
-      textElements.forEach(el => {
-        // Skip buttons
-        if (el.closest('button') || el.querySelector('button') ||
-            el.getAttribute('role') === 'button' || el.closest('[role="button"]')) {
-          return;
-        }
-        
-        // Skip elements with icons
-        if (el.querySelector('i, svg')) return;
-        
-        const text = el.textContent?.trim();
-        if (!text || text.length < 10) return;
-        
-        if (!this.isValidCaption(text)) return;
-        
-        // Collect the longest text (the actual caption, not speaker name)
-        if (text.length > currentCaptionText.length) {
-          currentCaptionText = text;
-        }
-      });
+      // Find all caption blocks (direct children of container)
+      const captionBlocks = captionContainer.querySelectorAll(':scope > div');
       
-      if (!currentCaptionText) return;
+      for (const block of captionBlocks) {
+        // Skip settings/UI blocks (buttons, navigation)
+        if (block.querySelector('button')) continue;
+        if (block.classList.contains('IMKgW')) continue; // Skip button container
+        
+        const { speakerName, captionText } = this.extractCaptionFromBlock(block);
+        
+        if (captionText && captionText.length > 5 && this.isValidCaption(captionText)) {
+          captionEntries.push({
+            speaker: speakerName || 'Unknown',
+            text: captionText
+          });
+        }
+      }
+      
+      // Fallback: try to get text from all leaf divs
+      if (captionEntries.length === 0) {
+        const textDivs = captionContainer.querySelectorAll('div');
+        for (const el of textDivs) {
+          // Skip if contains img (speaker block) or buttons
+          if (el.querySelector('img, button, svg, i')) continue;
+          if (el.closest('button')) continue;
+          
+          // Only get leaf nodes (no child divs with text)
+          const childDivText = el.querySelector('div')?.textContent?.trim() || '';
+          if (childDivText.length > 10) continue;
+          
+          const text = el.textContent?.trim();
+          if (text && text.length > 5 && this.isValidCaption(text)) {
+            // Avoid duplicates
+            if (!captionEntries.some(e => e.text.includes(text) || text.includes(e.text))) {
+              captionEntries.push({ speaker: 'Unknown', text });
+            }
+          }
+        }
+      }
+      
+      if (captionEntries.length === 0) return;
       
       const now = Date.now();
       
-      // Check if this is an UPDATE of the current caption or a NEW caption
-      // Google Meet updates captions in place as speech is recognized
-      
-      if (this.pendingCaption) {
-        // Check if current text is an extension of pending (same caption being updated)
-        const isExtension = currentCaptionText.startsWith(this.pendingCaption.substring(0, 20)) ||
-                           this.pendingCaption.startsWith(currentCaptionText.substring(0, 20)) ||
-                           currentCaptionText.includes(this.pendingCaption.substring(0, 15));
-        
-        if (isExtension) {
-          // Same caption being updated - keep the longer version
-          if (currentCaptionText.length >= this.pendingCaption.length) {
-            this.pendingCaption = currentCaptionText;
-            this.lastCaptionTime = now;
-          }
-        } else {
-          // New caption started - finalize the old one and start new
-          this.finalizePendingCaption();
-          this.pendingCaption = currentCaptionText;
-          this.lastCaptionTime = now;
-        }
-      } else {
-        // First caption
-        this.pendingCaption = currentCaptionText;
-        this.lastCaptionTime = now;
+      // Initialize pending captions map if needed (tracks each speaker separately)
+      if (!this.pendingCaptions) {
+        this.pendingCaptions = new Map();
       }
       
-      // If caption hasn't changed for 2 seconds, consider it final
-      if (now - this.lastCaptionTime > 2000 && this.pendingCaption) {
-        this.finalizePendingCaption();
+      // Helper to normalize text for comparison
+      const normalize = (t) => t.toLowerCase().replace(/[.,?!:;'"]/g, '').replace(/\s+/g, ' ').trim();
+      
+      // Create unique keys for each caption block (speaker + first words)
+      // This allows same speaker to have multiple separate utterances
+      const getBlockKey = (speaker, text) => {
+        const words = normalize(text).split(' ').slice(0, 3).join(' ');
+        return `${speaker}::${words}`;
+      };
+      
+      // Get current block keys
+      const currentBlockKeys = new Set();
+      for (const entry of captionEntries) {
+        if (entry.text && entry.text.length >= 5) {
+          currentBlockKeys.add(getBlockKey(entry.speaker || 'Unknown', entry.text));
+        }
+      }
+      
+      // Finalize blocks that are NO LONGER visible (scrolled away)
+      for (const [blockKey, pending] of this.pendingCaptions.entries()) {
+        if (!currentBlockKeys.has(blockKey) && pending.text && pending.text.length >= 10) {
+          console.log(`👋 Block gone, finalizing [${pending.speaker}]: ${pending.text.length} chars`);
+          this.saveCaptionToTranscript(pending.text, pending.speaker);
+          this.pendingCaptions.delete(blockKey);
+        }
+      }
+      
+      // Process each caption block
+      for (const entry of captionEntries) {
+        const { speaker, text } = entry;
+        if (!text || text.length < 5) continue;
+        
+        const speakerKey = speaker || 'Unknown';
+        const blockKey = getBlockKey(speakerKey, text);
+        
+        console.log(`🎯 [${speakerKey}] ${text.length} chars: "${text.substring(0, 60)}..."`);
+        
+        // Find if we have a pending caption that this is updating
+        let foundMatch = false;
+        for (const [existingKey, pending] of this.pendingCaptions.entries()) {
+          if (pending.speaker !== speakerKey) continue;
+          
+          const pendingNorm = normalize(pending.text);
+          const currentNorm = normalize(text);
+          
+          // Check if this is an update of existing pending
+          const pendingWords = pendingNorm.split(' ').slice(0, 4).join(' ');
+          const currentWords = currentNorm.split(' ').slice(0, 4).join(' ');
+          
+          const isUpdate = pendingWords === currentWords ||
+                          currentNorm.startsWith(pendingWords) ||
+                          pendingNorm.startsWith(currentWords);
+          
+          if (isUpdate) {
+            foundMatch = true;
+            // Update if longer
+            if (text.length >= pending.text.length) {
+              console.log(`📈 [${speakerKey}] Updated: ${pending.text.length} → ${text.length} chars`);
+              this.pendingCaptions.delete(existingKey);
+              this.pendingCaptions.set(blockKey, { text, speaker: speakerKey, time: now });
+            } else {
+              pending.time = now; // Just refresh time
+            }
+            break;
+          }
+        }
+        
+        if (!foundMatch) {
+          // New block - add it
+          console.log(`🆕 [${speakerKey}] New block: "${text.substring(0, 40)}..."`);
+          this.pendingCaptions.set(blockKey, { text, speaker: speakerKey, time: now });
+        }
+      }
+      
+      // Finalize blocks that haven't been updated for 6 seconds
+      for (const [blockKey, pending] of this.pendingCaptions.entries()) {
+        if (pending.text && pending.text.length >= 10 && now - pending.time > 6000) {
+          console.log(`⏰ [${pending.speaker}] Timeout, finalizing (${pending.text.length} chars)`);
+          this.saveCaptionToTranscript(pending.text, pending.speaker);
+          this.pendingCaptions.delete(blockKey);
+        }
       }
     };
     
-    // Finalize pending caption - add to transcript
+    // Save caption to transcript with duplicate detection
+    this.saveCaptionToTranscript = (text, speaker) => {
+      if (!text || text.length < 10) return;
+      
+      const normalize = (t) => t.toLowerCase().replace(/[.,?!:;'"]/g, '').replace(/\s+/g, ' ').trim();
+      const textNorm = normalize(text);
+      const textWords = textNorm.split(' ').slice(0, 4).join(' ');
+      
+      // Only check for EXACT or VERY SIMILAR duplicates (same utterance being updated)
+      // Don't merge different utterances from same speaker!
+      for (let i = this.transcript.length - 1; i >= Math.max(0, this.transcript.length - 10); i--) {
+        const existing = this.transcript[i];
+        const existingNorm = normalize(existing.text);
+        const existingWords = existingNorm.split(' ').slice(0, 4).join(' ');
+        
+        // Only match if SAME speaker AND same first words
+        if (existing.speaker === speaker && textWords === existingWords) {
+          if (text.length > existing.text.length) {
+            console.log(`🔄 [${speaker}] Updating same utterance: ${existing.text.length} → ${text.length} chars`);
+            existing.text = text;
+            existing.timestamp = new Date().toISOString();
+            this.updateBadge();
+            return;
+          } else {
+            console.log(`⏭️ [${speaker}] Skipping duplicate`);
+            return;
+          }
+        }
+        
+        // Also skip if text is nearly identical (within a few chars)
+        if (existing.speaker === speaker && 
+            (textNorm === existingNorm || 
+             (Math.abs(text.length - existing.text.length) < 10 && 
+              textNorm.includes(existingNorm.substring(0, 30))))) {
+          console.log(`⏭️ [${speaker}] Skipping near-duplicate`);
+          return;
+        }
+      }
+      
+      // Add new entry (this is a distinct utterance)
+      console.log(`✅ [${speaker}] Adding utterance #${this.transcript.length + 1}: "${text.substring(0, 50)}..."`);
+      this.transcript.push({
+        timestamp: new Date().toISOString(),
+        text: text,
+        speaker: speaker
+      });
+      this.updateBadge();
+    };
+    
+    // Legacy finalize (for compatibility)
     this.finalizePendingCaption = () => {
+      console.log(`📦 Finalizing: "${this.pendingCaption?.substring(0, 60)}..." (${this.pendingCaption?.length || 0} chars)`);
+      
       if (!this.pendingCaption || this.pendingCaption.length < 10) {
+        console.log('⏭️ Too short, skipping');
         this.pendingCaption = '';
+        this.pendingSpeaker = '';
         return;
       }
       
-      // Check if we already have this text (or very similar)
-      const isDuplicate = this.transcript.some(t => 
-        t.text === this.pendingCaption ||
-        t.text.includes(this.pendingCaption) ||
-        this.pendingCaption.includes(t.text)
-      );
+      const speaker = this.pendingSpeaker || '';
+      let shouldAdd = true;
+      let action = 'add';
       
-      if (!isDuplicate) {
-        console.log('✅ Final caption:', this.pendingCaption.substring(0, 60) + '...');
-        this.addCaption(this.pendingCaption);
+      // Normalize text for comparison (remove punctuation, lowercase)
+      const normalize = (text) => text.toLowerCase().replace(/[.,?!:;'"]/g, '').replace(/\s+/g, ' ').trim();
+      const pendingNorm = normalize(this.pendingCaption);
+      
+      // Find if there's an existing entry that this is an update of
+      // Check more entries (last 10) to catch all related fragments
+      for (let i = this.transcript.length - 1; i >= Math.max(0, this.transcript.length - 10); i--) {
+        const existing = this.transcript[i];
+        const existingNorm = normalize(existing.text);
+        
+        // Extract first N words for comparison
+        const pendingWords = pendingNorm.split(' ').slice(0, 5).join(' ');
+        const existingWords = existingNorm.split(' ').slice(0, 5).join(' ');
+        
+        // Exact duplicate - skip
+        if (existingNorm === pendingNorm) {
+          shouldAdd = false;
+          action = 'skip-exact';
+          break;
+        }
+        
+        // Same start (first 5 words match) - this is likely an update
+        const sameStart = pendingWords === existingWords || 
+                         pendingNorm.startsWith(existingWords) ||
+                         existingNorm.startsWith(pendingWords);
+        
+        if (sameStart) {
+          if (this.pendingCaption.length > existing.text.length) {
+            // New is longer - replace
+            console.log(`🔄 Replacing transcript[${i}]: ${existing.text.length} → ${this.pendingCaption.length} chars`);
+            existing.text = this.pendingCaption;
+            existing.speaker = speaker || existing.speaker;
+            existing.timestamp = new Date().toISOString();
+            shouldAdd = false;
+            action = 'replaced';
+          } else {
+            // Old is longer or same - skip
+            shouldAdd = false;
+            action = 'skip-shorter';
+          }
+          break;
+        }
+        
+        // Check if new text CONTAINS old text (it's a continuation)
+        if (pendingNorm.includes(existingNorm) && this.pendingCaption.length > existing.text.length + 20) {
+          console.log(`🔄 New contains old, replacing transcript[${i}]`);
+          existing.text = this.pendingCaption;
+          existing.speaker = speaker || existing.speaker;
+          existing.timestamp = new Date().toISOString();
+          shouldAdd = false;
+          action = 'replaced-contains';
+          break;
+        }
+      }
+      
+      console.log(`📋 Action: ${action} | Transcript: ${this.transcript.length} entries`);
+      
+      if (shouldAdd) {
+        console.log(`✅ ADDING to transcript [${speaker}]: "${this.pendingCaption.substring(0, 80)}..."`);
+        this.addCaption(this.pendingCaption, speaker);
       }
       
       this.pendingCaption = '';
+      this.pendingSpeaker = '';
     };
 
     // Check periodically
@@ -582,7 +912,7 @@ class MeetRecorder {
   /**
    * Add caption to transcript
    */
-  addCaption(text) {
+  addCaption(text, speaker = '') {
     // Clean up the text
     const cleanText = text
       .replace(/\s+/g, ' ')
@@ -590,22 +920,21 @@ class MeetRecorder {
     
     if (!cleanText) return;
     
-    // Avoid adding duplicate or very similar text
+    // Only skip exact duplicates (other checks done in finalizePendingCaption)
     const lastEntry = this.transcript[this.transcript.length - 1];
-    if (lastEntry) {
-      // Skip if text is contained in or contains last entry
-      if (lastEntry.text.includes(cleanText) || cleanText.includes(lastEntry.text)) {
-        return;
-      }
+    if (lastEntry && lastEntry.text === cleanText) {
+      return;
     }
     
     const entry = {
       timestamp: new Date().toISOString(),
-      text: cleanText
+      text: cleanText,
+      speaker: speaker || 'Unknown'
     };
     
     this.transcript.push(entry);
-    console.log(`📝 Caption: ${cleanText.substring(0, 60)}${cleanText.length > 60 ? '...' : ''}`);
+    const speakerPrefix = speaker ? `[${speaker}] ` : '';
+    console.log(`📝 ${speakerPrefix}${cleanText.substring(0, 60)}${cleanText.length > 60 ? '...' : ''}`);
     
     this.updateBadge();
   }
@@ -633,7 +962,17 @@ class MeetRecorder {
     
     this.isRecording = false;
     
-    // Finalize any pending caption
+    // Finalize ALL pending caption blocks
+    if (this.pendingCaptions) {
+      for (const [blockKey, pending] of this.pendingCaptions.entries()) {
+        if (pending.text && pending.text.length >= 10) {
+          console.log(`📦 Final save [${pending.speaker}]: ${pending.text.length} chars`);
+          this.saveCaptionToTranscript(pending.text, pending.speaker);
+        }
+      }
+      this.pendingCaptions.clear();
+    }
+    // Legacy fallback
     if (this.pendingCaption) {
       this.finalizePendingCaption();
     }
@@ -669,8 +1008,20 @@ class MeetRecorder {
       await this.generateIntermediateSummary();
     }
     
-    // Compile transcript
-    const fullTranscript = this.transcript.map(t => t.text).join(' ');
+    // Compile transcript with speaker names
+    let lastSpeaker = '';
+    const formattedParts = [];
+    
+    for (const t of this.transcript) {
+      if (t.speaker && t.speaker !== 'Unknown' && t.speaker !== lastSpeaker) {
+        formattedParts.push(`\n[${t.speaker}]: ${t.text}`);
+        lastSpeaker = t.speaker;
+      } else {
+        formattedParts.push(t.text);
+      }
+    }
+    
+    const fullTranscript = formattedParts.join(' ').trim();
     const duration = Math.round((new Date() - this.startTime) / 60000);
     
     console.log(`📊 Transcript: ${fullTranscript.length} chars, ${duration} minutes, ${this.transcript.length} entries`);
