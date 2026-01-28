@@ -24,6 +24,7 @@ from .transcription import (
     TranscriptionService,
 )
 from .summarizer import create_summarizer, DeepSeekSummarizer
+from .rag_service import RAGService, SyncService, create_rag_service
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +57,10 @@ class VoiceNotesBot:
         )
         
         self.anytype: AnytypeClient | None = None
+        
+        # RAG service for semantic search
+        self.rag: RAGService = create_rag_service("./data/vectordb")
+        self.sync_service: SyncService | None = None
         
         # Extension tokens - maps token to user_id (persisted to disk)
         self.extension_tokens: dict[str, int] = self._load_tokens()
@@ -420,6 +425,13 @@ class VoiceNotesBot:
             
             logger.info(f"Saved meeting note: {result.object_id}")
             
+            # Auto-index the meeting in RAG
+            await self._index_note(
+                note_id=result.object_id,
+                title=title,
+                body=body
+            )
+            
             # Notify user
             summary_preview = summary[:300] + "..." if len(summary) > 300 else summary
             chunks_info = f"\n📊 Chunks: {len(intermediate_summaries)}" if intermediate_summaries else ""
@@ -473,14 +485,155 @@ class VoiceNotesBot:
                     KeyboardButton(text="🔌 Подключить расширение"),
                 ],
                 [
+                    KeyboardButton(text="🔍 Спросить AI"),
+                    KeyboardButton(text="🔄 Синхронизировать"),
+                ],
+                [
                     KeyboardButton(text="📊 Статус"),
                     KeyboardButton(text="❓ Помощь"),
                 ],
             ],
             resize_keyboard=True,
-            input_field_placeholder="Отправьте голосовое сообщение..."
+            input_field_placeholder="Отправьте голосовое или задайте вопрос..."
         )
         return keyboard
+    
+    async def _handle_ask_question(self, message: Message):
+        """Handle asking questions using RAG."""
+        if not self._is_user_allowed(message.from_user.id):
+            await message.answer("⛔ You are not authorized to use this bot.")
+            return
+        
+        # Extract question from command
+        question = message.text.replace('/ask', '').strip()
+        
+        if not question:
+            await message.answer(
+                "🔍 *Задайте вопрос по вашим заметкам*\n\n"
+                "Использование: `/ask Ваш вопрос`\n\n"
+                "Примеры:\n"
+                "• `/ask Что обсуждали на последнем митинге?`\n"
+                "• `/ask Какие задачи мне нужно выполнить?`\n"
+                "• `/ask Что говорили про дедлайн?`",
+                parse_mode="Markdown",
+                reply_markup=self._get_main_keyboard(),
+            )
+            return
+        
+        # Check if we have any indexed notes
+        stats = self.rag.get_stats()
+        if stats.get('total_notes', 0) == 0:
+            await message.answer(
+                "📭 *База знаний пуста*\n\n"
+                "Сначала нужно синхронизировать заметки:\n"
+                "• Нажмите «🔄 Синхронизировать» или `/sync`\n"
+                "• Или создайте новые голосовые заметки",
+                parse_mode="Markdown",
+                reply_markup=self._get_main_keyboard(),
+            )
+            return
+        
+        status = await message.answer("🔍 Ищу релевантные заметки...")
+        
+        try:
+            # Search for relevant notes
+            relevant_notes = await self.rag.search(question, n_results=5, min_similarity=0.25)
+            
+            if not relevant_notes:
+                await status.edit_text(
+                    "🤷 Не нашёл релевантных заметок для вашего вопроса.\n\n"
+                    "Попробуйте:\n"
+                    "• Переформулировать вопрос\n"
+                    "• Синхронизировать заметки (`/sync`)"
+                )
+                return
+            
+            await status.edit_text("🤖 Генерирую ответ на основе заметок...")
+            
+            # Build context from relevant notes
+            context_parts = []
+            for i, note in enumerate(relevant_notes, 1):
+                title = note['metadata'].get('title', 'Без названия')
+                date = note['metadata'].get('created', '')[:10]
+                similarity = note['similarity']
+                text = note['text'][:1500]  # Limit text length
+                
+                context_parts.append(
+                    f"[Заметка {i}] {title} ({date}, релевантность: {similarity:.0%})\n{text}"
+                )
+            
+            context = "\n\n---\n\n".join(context_parts)
+            
+            # Generate answer using AI
+            answer = await self.summarizer.ask(question, context)
+            
+            # Format sources
+            sources = "\n".join([
+                f"• {note['metadata'].get('title', '?')[:40]} ({note['similarity']:.0%})"
+                for note in relevant_notes[:3]
+            ])
+            
+            await status.edit_text(
+                f"💡 *Ответ:*\n\n{answer}\n\n"
+                f"📚 *Источники:*\n{sources}",
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in ask: {e}", exc_info=True)
+            await status.edit_text(f"❌ Ошибка: {str(e)[:200]}")
+    
+    async def _handle_sync(self, message: Message):
+        """Handle syncing notes from Anytype to RAG."""
+        if not self._is_user_allowed(message.from_user.id):
+            await message.answer("⛔ You are not authorized to use this bot.")
+            return
+        
+        status = await message.answer("🔄 Синхронизирую заметки из Anytype...")
+        
+        try:
+            if not self.anytype:
+                await self.init_anytype()
+            
+            if not self.sync_service:
+                self.sync_service = SyncService(self.anytype, self.rag)
+            
+            stats = await self.sync_service.sync_all_notes()
+            
+            rag_stats = self.rag.get_stats()
+            
+            await status.edit_text(
+                f"✅ *Синхронизация завершена!*\n\n"
+                f"📥 Синхронизировано: {stats['synced']}\n"
+                f"⏭️ Пропущено: {stats['skipped']}\n"
+                f"❌ Ошибок: {stats['errors']}\n\n"
+                f"📚 Всего в базе: {rag_stats.get('total_notes', 0)} заметок\n\n"
+                f"Теперь можете задавать вопросы через `/ask`!",
+                parse_mode="Markdown",
+                reply_markup=self._get_main_keyboard(),
+            )
+            
+        except Exception as e:
+            logger.error(f"Sync error: {e}", exc_info=True)
+            await status.edit_text(f"❌ Ошибка синхронизации: {str(e)[:200]}")
+    
+    async def _index_note(self, note_id: str, title: str, body: str):
+        """Index a newly created note in the RAG database."""
+        try:
+            full_text = f"{title}\n\n{body}" if body else title
+            await self.rag.add_note(
+                note_id=note_id,
+                text=full_text,
+                metadata={
+                    'title': title,
+                    'source': 'voice_note',
+                    'anytype_id': note_id,
+                    'created': datetime.now().isoformat(),
+                }
+            )
+            logger.info(f"Auto-indexed note: {note_id}")
+        except Exception as e:
+            logger.error(f"Failed to auto-index note: {e}")
     
     def _register_handlers(self):
         """Register message handlers."""
@@ -512,19 +665,26 @@ class VoiceNotesBot:
             
             await message.answer(
                 "📖 *Справка Voice Notes Bot*\n\n"
-                "*Голосовые заметки:*\n"
+                "*🎤 Голосовые заметки:*\n"
                 "Просто отправь голосовое сообщение и бот:\n"
                 "• Транскрибирует речь в текст\n"
                 "• Создаст AI саммари\n"
                 "• Сохранит всё в Anytype\n\n"
-                "*Запись Google Meet:*\n"
+                "*🔍 Умный поиск (RAG):*\n"
+                "Задай вопрос и AI ответит на основе твоих заметок:\n"
+                "• `/ask Что обсуждали на митинге?`\n"
+                "• Или просто напиши вопрос текстом!\n"
+                "• `/sync` — синхронизировать заметки из Anytype\n\n"
+                "*📹 Запись Google Meet:*\n"
                 "1. Нажми «🔌 Подключить расширение»\n"
                 "2. Установи расширение в Chrome\n"
                 "3. Нажми кнопку подключения\n"
                 "4. Открой Google Meet и нажми Record!\n\n"
-                "*Для длинных митингов (>10 мин):*\n"
-                "Бот автоматически создаёт промежуточные саммари\n"
-                "каждые 10 минут для надёжности.",
+                "*Команды:*\n"
+                "• `/ask` — задать вопрос по заметкам\n"
+                "• `/sync` — синхронизировать из Anytype\n"
+                "• `/status` — статус сервисов\n"
+                "• `/extension` — настройка расширения",
                 parse_mode="Markdown",
                 reply_markup=self._get_main_keyboard(),
             )
@@ -597,11 +757,27 @@ class VoiceNotesBot:
             # Extension API
             status_lines.append("✅ Extension API: Running on port 3000")
             
+            # RAG stats
+            rag_stats = self.rag.get_stats()
+            status_lines.append(f"\n🧠 **RAG Knowledge Base**")
+            status_lines.append(f"📚 Indexed notes: {rag_stats.get('total_notes', 0)}")
+            status_lines.append(f"🔤 Model: {rag_stats.get('model', 'unknown')}")
+            
             await message.answer(
                 "\n".join(status_lines), 
                 parse_mode="Markdown",
                 reply_markup=self._get_main_keyboard(),
             )
+        
+        @self.dp.message(Command("ask"))
+        async def cmd_ask(message: Message):
+            """Handle /ask command for RAG queries."""
+            await self._handle_ask_question(message)
+        
+        @self.dp.message(Command("sync"))
+        async def cmd_sync(message: Message):
+            """Handle /sync command to sync notes from Anytype."""
+            await self._handle_sync(message)
         
         @self.dp.message(F.voice)
         async def handle_voice(message: Message):
@@ -665,6 +841,13 @@ class VoiceNotesBot:
                 
                 logger.info(f"Created Anytype object: {created_object.object_id}")
                 
+                # Auto-index the note in RAG
+                await self._index_note(
+                    note_id=created_object.object_id,
+                    title=created_object.name,
+                    body=f"{summary}\n\n{full_text}"
+                )
+                
                 # Send success message with preview (no Markdown to avoid parsing issues)
                 preview_text = full_text[:200] + "..." if len(full_text) > 200 else full_text
                 
@@ -718,11 +901,28 @@ class VoiceNotesBot:
                 await cmd_status(message)
             elif text == "❓ Помощь":
                 await cmd_help(message)
-            else:
+            elif text == "🔍 Спросить AI":
+                await message.answer(
+                    "🔍 *Задайте вопрос по вашим заметкам*\n\n"
+                    "Просто напишите вопрос в чат, например:\n"
+                    "• `Что обсуждали на митинге про резюме?`\n"
+                    "• `Какие были решения по проекту?`\n"
+                    "• `Что нужно сделать до пятницы?`\n\n"
+                    "Или используйте команду: `/ask Ваш вопрос`",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_main_keyboard(),
+                )
+            elif text == "🔄 Синхронизировать":
+                await self._handle_sync(message)
+            elif text.startswith('/') or len(text) < 10:
                 await message.answer(
                     "💡 Используй кнопки меню внизу или отправь голосовое сообщение!",
                     reply_markup=self._get_main_keyboard(),
                 )
+            else:
+                # Treat any other text as a question for RAG
+                message.text = f"/ask {text}"
+                await self._handle_ask_question(message)
     
     async def start(self):
         """Start the bot."""

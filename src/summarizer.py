@@ -144,6 +144,52 @@ Write in the same language as the input summaries."""
         
         return response.choices[0].message.content or ""
     
+    async def ask(self, question: str, context: str, language: str = "auto") -> str:
+        """
+        Answer a question based on provided context (RAG).
+        
+        Args:
+            question: User's question
+            context: Relevant notes/documents to base the answer on
+            language: Target language (auto = same as question)
+        
+        Returns:
+            AI-generated answer based on context
+        """
+        system_prompt = """You are a helpful assistant that answers questions based on the user's notes and meeting transcripts.
+
+Rules:
+1. ONLY use information from the provided context (notes) to answer
+2. If the context doesn't contain relevant information, say so honestly
+3. Keep answers concise but informative
+4. Cite which note the information comes from when possible
+5. Respond in the same language as the question
+
+Be helpful and accurate. Don't make up information that isn't in the notes."""
+
+        user_prompt = f"""Based on my notes below, please answer this question:
+
+QUESTION: {question}
+
+MY NOTES:
+---
+{context}
+---
+
+Please provide a helpful answer based only on the information in my notes."""
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=1500,
+        )
+        
+        return response.choices[0].message.content or ""
+    
     async def close(self):
         """Close the client connection."""
         await self.client.close()
