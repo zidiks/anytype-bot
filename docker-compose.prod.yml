@@ -5,10 +5,13 @@ services:
     image: ghcr.io/zidiks/anytype-bot:latest
     restart: unless-stopped
     env_file: .env
+    environment:
+      - HF_HOME=/app/data/huggingface
+      - TRANSFORMERS_CACHE=/app/data/huggingface
     ports:
       - "3000:3000"
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data  # Persists vectordb + HuggingFace models
 
   whisper:
     image: onerahmet/openai-whisper-asr-webservice:latest

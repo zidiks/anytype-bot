@@ -13,10 +13,12 @@ services:
     environment:
       - WHISPER_MODE=api
       - WHISPER_API_URL=http://whisper:9000
+      - HF_HOME=/app/data/huggingface
+      - TRANSFORMERS_CACHE=/app/data/huggingface
     ports:
       - "3000:3000"  # Web API for extension
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data  # Persists vectordb + HuggingFace models
     networks:
       - anytype-net
 

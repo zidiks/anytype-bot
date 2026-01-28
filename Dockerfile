@@ -14,17 +14,18 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies (sentence-transformers needs build tools)
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Pre-download the embedding model to speed up first run
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')" || true
 
 # Copy application code
 COPY . .
 
 # Create data directory for vector DB and tokens
 RUN mkdir -p /app/data/vectordb
+
+# Set HuggingFace cache to data volume (model downloads on first use)
+ENV HF_HOME=/app/data/huggingface
+ENV TRANSFORMERS_CACHE=/app/data/huggingface
 
 # Expose port for extension API
 EXPOSE 3000
