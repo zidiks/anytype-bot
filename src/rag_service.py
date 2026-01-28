@@ -282,12 +282,39 @@ class SyncService:
                     
                     # Get full object with body
                     full_obj = await self.anytype.get_object(obj_id)
-                    body = full_obj.get("body", "")
+                    
+                    # Debug: log first object structure
+                    if stats['synced'] == 0 and stats['skipped'] == 0:
+                        logger.info(f"Sample object structure: {list(full_obj.keys())}")
+                        if 'body' in full_obj:
+                            body_sample = str(full_obj.get('body', ''))[:200]
+                            logger.info(f"Body sample: {body_sample}")
+                        if 'blocks' in full_obj:
+                            logger.info(f"Has blocks: {len(full_obj.get('blocks', []))} blocks")
+                    
+                    # Extract body - could be string or need to extract from blocks
+                    body = ""
+                    if isinstance(full_obj.get("body"), str):
+                        body = full_obj.get("body", "")
+                    elif "blocks" in full_obj:
+                        # Extract text from blocks
+                        blocks = full_obj.get("blocks", [])
+                        body_parts = []
+                        for block in blocks:
+                            if isinstance(block, dict):
+                                # Try different block formats
+                                text = block.get("text", "")
+                                if isinstance(text, dict):
+                                    text = text.get("text", "") or text.get("content", "")
+                                if text:
+                                    body_parts.append(str(text))
+                        body = "\n".join(body_parts)
                     
                     # Combine name and body for indexing
                     full_text = f"{name}\n\n{body}" if body else name
                     
                     if len(full_text) < 20:
+                        logger.debug(f"Skipping short note: {name[:50]} ({len(full_text)} chars)")
                         stats['skipped'] += 1
                         continue
                     
