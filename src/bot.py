@@ -573,15 +573,20 @@ class VoiceNotesBot:
                 for note in relevant_notes[:3]
             ])
             
-            await status.edit_text(
-                f"💡 *Ответ:*\n\n{answer}\n\n"
-                f"📚 *Источники:*\n{sources}",
-                parse_mode="Markdown"
+            response_text = (
+                f"💡 Ответ:\n\n{answer}\n\n"
+                f"📚 Источники:\n{sources}"
             )
+            
+            # Send without Markdown to avoid parsing errors from AI response
+            await status.edit_text(response_text)
             
         except Exception as e:
             logger.error(f"Error in ask: {e}", exc_info=True)
-            await status.edit_text(f"❌ Ошибка: {str(e)[:200]}")
+            try:
+                await status.edit_text(f"❌ Ошибка: {str(e)[:200]}")
+            except:
+                pass
     
     async def _handle_sync(self, message: Message):
         """Handle syncing notes from Anytype to RAG."""
