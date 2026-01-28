@@ -260,10 +260,11 @@ class SyncService:
         
         try:
             # Search for all Note objects
-            # Using empty query to get all
+            # API: POST /v1/spaces/{space_id}/search
+            # Docs: https://developers.anytype.io/docs/reference/2025-11-08/search-space
             response = await self.anytype._request(
                 "POST",
-                f"/spaces/{self.anytype.space_id}/objects/search",
+                f"/spaces/{self.anytype.space_id}/search",
                 json_data={
                     "query": "",
                     "types": ["ot-note"],

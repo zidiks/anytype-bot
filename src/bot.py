@@ -610,7 +610,6 @@ class VoiceNotesBot:
                 f"📚 Всего в базе: {rag_stats.get('total_notes', 0)} заметок\n\n"
                 f"Теперь можете задавать вопросы через `/ask`!",
                 parse_mode="Markdown",
-                reply_markup=self._get_main_keyboard(),
             )
             
         except Exception as e:
