@@ -189,6 +189,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ connected: false }));
     return true;
   }
+  
+  if (message.action === 'keepAlive') {
+    // Keep-alive ping from content script to prevent service worker from sleeping
+    sendResponse({ alive: true, timestamp: Date.now() });
+    return false;
+  }
 });
 
 /**

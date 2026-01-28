@@ -24,6 +24,13 @@ class MeetRecorder {
     this.SUMMARY_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
     this.MIN_CHARS_FOR_SUMMARY = 500; // Minimum chars before generating summary
     
+    // Keep-alive to prevent tab throttling
+    this.keepAliveInterval = null;
+    this.keepAliveAudio = null;
+    this.visibilityHandler = null;
+    this.webLockAbort = null;
+    this.webLockRelease = null;
+    
     // Patterns to filter out (UI elements, not real captions)
     this.filterPatterns = [
       // Device names
@@ -199,6 +206,104 @@ class MeetRecorder {
   }
 
   /**
+   * Start keep-alive mechanisms to prevent tab throttling
+   */
+  startKeepAlive() {
+    console.log('🔋 Starting keep-alive mechanisms...');
+    
+    // 1. Periodic message to background script
+    this.keepAliveInterval = setInterval(() => {
+      chrome.runtime.sendMessage({ action: 'keepAlive' }).catch(() => {});
+      // Touch DOM to prevent throttling
+      void document.hidden;
+    }, 15000); // Every 15 seconds
+    
+    // 2. Silent audio to prevent tab suspension
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      gainNode.gain.value = 0.001; // Nearly silent
+      oscillator.frequency.value = 1; // Very low frequency
+      oscillator.start();
+      
+      this.keepAliveAudio = { context: audioContext, oscillator };
+      console.log('🔊 Silent audio keep-alive started');
+    } catch (e) {
+      console.warn('Could not start audio keep-alive:', e);
+    }
+    
+    // 3. Web Lock API - prevents tab from being discarded
+    if (navigator.locks) {
+      this.webLockAbort = new AbortController();
+      navigator.locks.request(
+        'meet-recorder-active',
+        { signal: this.webLockAbort.signal },
+        () => new Promise((resolve) => {
+          // This promise never resolves while recording, keeping the lock
+          this.webLockRelease = resolve;
+        })
+      ).catch(() => {}); // Ignore abort errors
+      console.log('🔒 Web Lock acquired');
+    }
+    
+    // 4. Handle visibility change - try to resume when tab becomes visible again
+    this.visibilityHandler = () => {
+      if (!document.hidden && this.isRecording) {
+        console.log('👁️ Tab visible again, ensuring capture is active...');
+        // Re-check caption observer
+        if (!this.captionObserver) {
+          this.observeCaptions();
+        }
+        // Resume audio context if suspended
+        if (this.keepAliveAudio?.context?.state === 'suspended') {
+          this.keepAliveAudio.context.resume();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+  
+  /**
+   * Stop keep-alive mechanisms
+   */
+  stopKeepAlive() {
+    console.log('🔋 Stopping keep-alive mechanisms...');
+    
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+    
+    if (this.keepAliveAudio) {
+      try {
+        this.keepAliveAudio.oscillator.stop();
+        this.keepAliveAudio.context.close();
+      } catch (e) {}
+      this.keepAliveAudio = null;
+    }
+    
+    // Release Web Lock
+    if (this.webLockRelease) {
+      this.webLockRelease();
+      this.webLockRelease = null;
+      console.log('🔓 Web Lock released');
+    }
+    if (this.webLockAbort) {
+      this.webLockAbort.abort();
+      this.webLockAbort = null;
+    }
+    
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+  }
+
+  /**
    * Start recording
    */
   async startRecording() {
@@ -218,6 +323,9 @@ class MeetRecorder {
     
     this.updateButton();
     this.showNotification('Recording started! Make sure captions are ON (press C).');
+    
+    // Start keep-alive to prevent tab throttling
+    this.startKeepAlive();
     
     // Notify Telegram
     chrome.runtime.sendMessage({
@@ -529,6 +637,9 @@ class MeetRecorder {
     if (this.pendingCaption) {
       this.finalizePendingCaption();
     }
+    
+    // Stop keep-alive
+    this.stopKeepAlive();
     
     // Stop all intervals
     if (this.captionInterval) {
